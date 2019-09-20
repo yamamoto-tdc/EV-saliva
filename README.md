@@ -44,24 +44,24 @@ $ draw_heat_map -y 4,P01596,P04003,P06737,P63167,Q13347,Q9UL52
 
 ## Options
 
--h  Print usage
--a  Draw all the heat maps
--b  Draw frame lines
--c  Draw heat colors
--d  Use the 16 fractions
--e  Print description of a protein, should be used with -p
--k  List 0-based peak positions, shold be used with -p
--l  List of all the proteins
--m  Enhance heat map colors
--n  Tabulate ranks, should be used with -p
--o  Tabulate the area values, should be used with -p
--p  Draw a heat map of a specified protein
--r  List of type1 proteins
--s  List of type2 proteins
--t  List of type3 proteins
--v  Print its version number
--w  Draw stepwise heat colors
--y  Layer expression levels of specified proteins
+-h  Print usage  
+-a  Draw all the heat maps  
+-b  Draw frame lines  
+-c  Draw heat colors  
+-d  Use the 16 fractions  
+-e  Print description of a protein, should be used with -p  
+-k  List 0-based peak positions, shold be used with -p  
+-l  List of all the proteins  
+-m  Enhance heat map colors  
+-n  Tabulate ranks, should be used with -p  
+-o  Tabulate the area values, should be used with -p  
+-p  Draw a heat map of a specified protein  
+-r  List of type1 proteins  
+-s  List of type2 proteins  
+-t  List of type3 proteins  
+-v  Print its version number  
+-w  Draw stepwise heat colors  
+-y  Layer expression levels of specified proteins  
       (samples; 0: 1u, 1: 1l, 2: 2u, 3: 2l, 4: 3u, 5: 3l) 
 
 --------
