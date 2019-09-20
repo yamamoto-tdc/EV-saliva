@@ -16,29 +16,29 @@ draw_heat_map [-a] [-b] [-d] [-e] [-h] [-k] [-l] [-m] [-n] \
 
 ## Usage
 
-$ perldoc draw_heat_map
-$ draw_heat_map -h
-$ draw_heat_map -a
-$ draw_heat_map -l
-$ draw_heat_map -a -d
-$ draw_heat_map -a -m -d
-$ draw_heat_map -a -b -m -d
-$ draw_heat_map -e -p P60953
-$ draw_heat_map -k -p P27701
-$ draw_heat_map -k -p P27701 -d
-$ draw_heat_map -n -p Q9NQ84
-$ draw_heat_map -n -p Q9NQ84 -d
-$ draw_heat_map -o -p P80748
-$ draw_heat_map -o -p P80748 -d
-$ draw_heat_map -p P05109
-$ draw_heat_map -r
-$ draw_heat_map -r -d
-$ draw_heat_map -s
-$ draw_heat_map -s -d
-$ draw_heat_map -t
-$ draw_heat_map -v
-$ draw_heat_map -w
-$ draw_heat_map -y 4,P01596,P04003,P06737,P63167,Q13347,Q9UL52
+$ perldoc draw_heat_map  
+$ draw_heat_map -h  
+$ draw_heat_map -a  
+$ draw_heat_map -l  
+$ draw_heat_map -a -d  
+$ draw_heat_map -a -m -d  
+$ draw_heat_map -a -b -m -d  
+$ draw_heat_map -e -p P60953  
+$ draw_heat_map -k -p P27701  
+$ draw_heat_map -k -p P27701 -d  
+$ draw_heat_map -n -p Q9NQ84  
+$ draw_heat_map -n -p Q9NQ84 -d  
+$ draw_heat_map -o -p P80748  
+$ draw_heat_map -o -p P80748 -d  
+$ draw_heat_map -p P05109  
+$ draw_heat_map -r  
+$ draw_heat_map -r -d  
+$ draw_heat_map -s  
+$ draw_heat_map -s -d  
+$ draw_heat_map -t  
+$ draw_heat_map -v  
+$ draw_heat_map -w  
+$ draw_heat_map -y 4,P01596,P04003,P06737,P63167,Q13347,Q9UL52  
 
 --------
 
