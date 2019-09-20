@@ -1,0 +1,924 @@
+#!/usr/bin/env perl
+
+=head1 NAME
+
+  draw_heat_map - analyze quantified mass data and draw heat maps
+
+=head1 SYNOPSIS
+
+  draw_heat_map [-a] [-b] [-d] [-e] [-h] [-k] [-l] [-m] [-n] \
+                [-o] [-p Accession__of_a_protein] [-r] [-s] [-t] \
+                [-v] [-w] [-y sample,protein1,protein2,...]
+
+=head1 USAGE
+
+  $ perldoc draw_heat_map
+  $ draw_heat_map -h
+  $ draw_heat_map -a
+  $ draw_heat_map -l
+  $ draw_heat_map -a -d
+  $ draw_heat_map -a -m -d
+  $ draw_heat_map -a -b -m -d
+  $ draw_heat_map -e -p P60953
+  $ draw_heat_map -k -p P27701
+  $ draw_heat_map -k -p P27701 -d
+  $ draw_heat_map -n -p Q9NQ84
+  $ draw_heat_map -n -p Q9NQ84 -d
+  $ draw_heat_map -o -p P80748
+  $ draw_heat_map -o -p P80748 -d
+  $ draw_heat_map -p P05109
+  $ draw_heat_map -r
+  $ draw_heat_map -r -d
+  $ draw_heat_map -s
+  $ draw_heat_map -s -d
+  $ draw_heat_map -t
+  $ draw_heat_map -v
+  $ draw_heat_map -w
+  $ draw_heat_map -y 4,P01596,P04003,P06737,P63167,Q13347,Q9UL52
+
+=head1 DESCRIPTION
+
+  This script analyzes quantified mass data for the saliva exosome
+  project and draws heat maps.
+
+=head1 OPTIONS
+
+  -h  Print usage
+  -a  Draw all the heat maps
+  -b  Draw frame lines
+  -c  Draw heat colors
+  -d  Use the 16 fractions
+  -e  Print description of a protein, should be used with -p
+  -k  List 0-based peak positions, shold be used with -p
+  -l  List of all the proteins
+  -m  Enhance heat map colors
+  -n  Tabulate ranks, should be used with -p
+  -o  Tabulate the area values, should be used with -p
+  -p  Draw a heat map of a specified protein
+  -r  List of type1 proteins
+  -s  List of type2 proteins
+  -t  List of type3 proteins
+  -v  Print its version number
+  -w  Draw stepwise heat colors
+  -y  Layer expression levels of specified proteins
+        (samples; 0: 1u, 1: 1l, 2: 2u, 3: 2l, 4: 3u, 5: 3l) 
+
+=head1 AUTHOR
+
+  Coded by Kohji OKAMURA, Ph.D.
+
+=head1 HISTORY
+
+  2016-08-01  Draw an SVG heat map without reading data
+  2016-08-10  Released as ver. 1.0; the first release to JFCR
+  2016-08-12  Released as ver. 1.1; options -lrsv supported
+  2016-08-15  Released as ver. 1.2; options -c supported
+  2016-08-22  Add option -d for the 16 fractions
+  2016-08-31  Add option -m for enhancing heat map colours; ver. 1.3
+  2016-09-01  Use "00ff00" if expression lelvel is 0
+  2016-09-01  Add option -b for drawing frame lines
+  2016-09-05  Add option -y for layering several proteins
+  2016-09-09  Separate function draw_frame() for option -b
+  2016-09-28  Fix a bug derived from missing fridx 1-3 in sample 1
+  2016-10-01  Add function heat_colours_stepwise()
+  2016-12-18  Group peak positions for hexdec; ver. 1.6
+  2016-12-18  Add option -k to know peak positions
+  2016-12-18  Delete "HM_*.svg" and sync before execution of this script
+  2016-12-19  Integrate operations related to %proteino; ver. 1.7
+  2016-12-19  Code prep_colour(), print_proteino(), etc.
+  2016-12-23  Add print_text(), option -e; fix a hexdec $frd-- bug
+  2017-03-05  Add process for type3; ver. 1.9
+  2017-03-26  Redefine type1 and type2; ver. 2.0
+  2017-05-12  Fix a bug using make_ranks(); ver. 2.1
+  2017-05-12  Make compare_peaks() return -1 when no data
+  2017-06-16  Fix a bug at calling compare_peaks(4, 5); ver. 2.2
+  2017-07-31  Reset @grouped_peaks for every protein;  ver. 2.3
+  2019-09-20  Revive print_footer(); ver. 2.4
+
+=cut
+
+
+use warnings;
+use strict;
+use English;
+use Getopt::Std;
+
+my $ver = '2.4';
+
+my $marginh = 90;
+my $marginv = 40;
+my $cellh = 30;
+my $cellv = 40;
+my $spacev = 60;
+my $lw = 1;
+my $fontcolour = 'black';
+my $fontsize = 18;
+my $fontx = 8;
+my $fonty = 24;
+
+my $max_area = log 2620000000 / log 10;
+my $msarea = 'data/msarea.txt';
+my $acc = 'data/proteins.txt';
+
+my %opts;
+my %proteino;	# original area values
+my %proteins;	# log of area values
+my %selected1;
+my %selected2;
+my %selected3;
+my %accessions;
+my @msarea;
+my @peaks;	# 6 integer or string elements to memorize each peak fragment
+my @ranks;
+my @grouped_peaks;
+my $line;
+my $colour;
+my $hexdec = 10;	# decimal (10) or hexadecimal (16 or 0x10)
+my ($flag01, $flag12, $flag14, $flag23, $flag34, $flag45);
+
+getopts 'abcdehklmnop:rstvwy:', \%opts;
+unlink glob "HM_*.svg"; `sync`;
+if (defined $opts{h})                                     { exec "perldoc $0" }
+if (defined $opts{v})                          { print "$0 ver. $ver\n"; exit }
+if (defined $opts{c}) { &heat_colours(); exit }
+if (defined $opts{d}) { $hexdec = 0x10 }
+if (defined $opts{w}) { &heat_colours_stepwise(); exit }
+
+open ACC, $acc                                        or die "$OS_ERROR: $acc";
+while ($line = <ACC>)
+{
+  $line =~ m/^(\w+)\t(.+)\n$/               or die "Unexpected error 1: $line";
+  $accessions{$1} = $2;
+}
+close ACC;
+if (defined $opts{l})
+{ foreach (keys %accessions) { print "$ARG\t$accessions{$ARG}\n" } ; exit }
+if (defined $opts{e} and defined $opts{p})
+{
+  if (exists $accessions{$opts{p}}) { print "$accessions{$opts{p}}\n"; exit }
+  else { print STDERR "$opts{p}: not found\n"; exit }
+}
+
+open MSAREA, $msarea                               or die "$OS_ERROR: $msarea";
+while ($line = <MSAREA>)
+{
+  chomp $line;
+  @msarea = split /\t/, $line;
+  $proteino{$msarea[3]} = [];
+  $proteins{$msarea[3]} = [];
+}
+seek MSAREA, 0, 0;
+while ($line = <MSAREA>)
+{
+  my $index;
+  chomp $line;
+  @msarea = split /\t/, $line;
+  if    ($msarea[0] eq 's1') { $index =  0 }
+  elsif ($msarea[0] eq 's2') { $index = 20 }
+  elsif ($msarea[0] eq 's3') { $index = 40 }
+  else                                      { die "Unexpected error 0: $line" }
+  if ($msarea[1] eq 'l') { $index += 10 }
+  $index += ($msarea[2] - 1);
+  $proteino{$msarea[3]}[$index] = $msarea[4];
+  if ($msarea[4] == 0) { $proteins{$msarea[3]}[$index] = 0 }
+  else { $proteins{$msarea[3]}[$index] = log $msarea[4] / log 10 }
+}
+foreach my $protein (keys %proteins)
+{
+  for (my $fridx = 0; $fridx < 0x60; $fridx++)
+  {
+    unless (defined $proteins{$protein}[$fridx])
+    { $proteino{$protein}[$fridx] = $proteins{$protein}[$fridx] = -1 }
+  }
+}
+close MSAREA;
+	## an example of data format
+	## s2    u    01    P05546    1.74E+05
+
+if ($hexdec == 0x10)
+{
+  foreach my $protein (keys %proteins)
+  {
+    my $frd = $hexdec * 6 - 1;
+    for (my $fridx = 60 - 1; $fridx >= 0; $fridx--)
+    {
+      $proteino{$protein}[$frd] = $proteino{$protein}[$fridx];
+      $proteins{$protein}[$frd] = $proteins{$protein}[$fridx];
+      $frd--;
+      if ($frd == 0x5b)
+      {
+        $proteino{$protein}[0x5a] = $proteins{$protein}[0x5b] = -1;
+        $proteins{$protein}[0x5a] = $proteins{$protein}[0x5b] = -1;
+        $frd = 0x59; next;
+      }
+      if ($frd == 0x57)
+      {
+        $proteino{$protein}[0x57] = $proteins{$protein}[0x57] = -1;
+        $frd = 0x56; next;
+      }
+      if ($frd == 0x55)
+      {
+        $proteino{$protein}[0x55] = $proteins{$protein}[0x55] = -1;
+        $frd = 0x54; next;
+      }
+      if ($frd == 0x53)
+      {
+        $proteino{$protein}[0x53] = $proteins{$protein}[0x53] = -1;
+        $frd = 0x52; next;
+      }
+      if ($frd == 0x50)
+      {
+        $proteino{$protein}[0x50] = $proteins{$protein}[0x50] = -1;
+        $frd = 0x4f; next;
+      }
+      if ($frd == 0x4c)
+      {
+        $proteino{$protein}[0x4c] = $proteins{$protein}[0x4c] = -1;
+        $frd = 0x4b; next;
+      }
+      if ($frd == 0x4a)
+      {
+        $proteino{$protein}[0x49] = $proteino{$protein}[0x4a] =
+        $proteins{$protein}[0x49] = $proteins{$protein}[0x4a] = -1;
+        $frd = 0x48; next;
+      }
+      if ($frd == 0x46)
+      {
+        $proteino{$protein}[0x46] = $proteins{$protein}[0x46] = -1;
+        $frd = 0x45; next;
+      }
+      if ($frd == 0x44)
+      {
+        $proteino{$protein}[0x44] = $proteins{$protein}[0x44] = -1;
+        $frd = 0x43; next;
+      }
+      if ($frd == 0x41)
+      {
+        $proteino{$protein}[0x41] = $proteins{$protein}[0x41] = -1;
+        $frd = 0x40; next;
+      }
+      if ($frd == 0x3b)
+      {
+        $proteino{$protein}[0x3a] = $proteino{$protein}[0x3b] =
+        $proteins{$protein}[0x3a] = $proteins{$protein}[0x3b] = -1;
+        $frd = 0x39; next;
+      }
+      if ($frd == 0x38)
+      {
+        $proteino{$protein}[0x38] = $proteins{$protein}[0x38] = -1;
+        $frd = 0x37; next;
+      }
+      if ($frd == 0x35)
+      {
+        $proteino{$protein}[0x35] = $proteins{$protein}[0x35] = -1;
+        $frd = 0x34; next;
+      }
+      if ($frd == 0x33)
+      {
+        $proteino{$protein}[0x33] = $proteins{$protein}[0x33] = -1;
+        $frd = 0x32; next;
+      }
+      if ($frd == 0x30)
+      {
+        $proteino{$protein}[0x30] = $proteins{$protein}[0x30] = -1;
+        $frd = 0x2f; next;
+      }
+      if ($frd == 0x2b)
+      {
+        $proteino{$protein}[0x2a] = $proteino{$protein}[0x2b] =
+        $proteins{$protein}[0x2a] = $proteins{$protein}[0x2b] = -1;
+        $frd = 0x29; next;
+      }
+      if ($frd == 0x28)
+      {
+        $proteino{$protein}[0x28] = $proteins{$protein}[0x28] = -1;
+        $frd = 0x27; next;
+      }
+      if ($frd == 0x25)
+      {
+        $proteino{$protein}[0x25] = $proteins{$protein}[0x25] = -1;
+        $frd = 0x24; next;
+      }
+      if ($frd == 0x23)
+      {
+        $proteino{$protein}[0x23] = $proteins{$protein}[0x23] = -1;
+        $frd = 0x22; next;
+      }
+      if ($frd == 0x20)
+      {
+        $proteino{$protein}[0x20] = $proteins{$protein}[0x20] = -1;
+        $frd = 0x1f; next;
+      }
+      if ($frd == 0x1c)
+      {
+        $proteino{$protein}[0x1c] = $proteins{$protein}[0x1c] = -1;
+        $frd = 0x1b; next;
+      }
+      if ($frd == 0x1a)
+      {
+        $proteino{$protein}[0x1a] = $proteins{$protein}[0x1a] = -1;
+        $frd = 0x19; next;
+      }
+      if ($frd == 0x18)
+      {
+        $proteino{$protein}[0x18] = $proteins{$protein}[0x18] = -1;
+        $frd = 0x17; next;
+      }
+      if ($frd == 0x16)
+      {
+        $proteino{$protein}[0x16] = $proteins{$protein}[0x16] = -1;
+        $frd = 0x15; next;
+      }
+      if ($frd == 0x14)
+      {
+        $proteino{$protein}[0x14] = $proteins{$protein}[0x14] = -1;
+        $frd = 0x13; next;
+      }
+      if ($frd == 0x10)
+      {
+        $proteino{$protein}[0x10] = $proteins{$protein}[0x10] = -1;
+        $frd = 0xf; next;
+      }
+      if ($frd == 0xc)
+      {
+        $proteino{$protein}[0xc] = $proteins{$protein}[0xc]  = -1;
+        $frd = 0xb; next;
+      }
+      if ($frd == 0xa)
+      {
+        $proteino{$protein}[0xa] = $proteins{$protein}[0xa]  = -1;
+        $frd = 0x9; next;
+      }
+      if ($frd == 0x8)
+      {
+        $proteino{$protein}[0x8] = $proteins{$protein}[0x8] = -1;
+        $frd = 0x7; next;
+      }
+      if ($frd == 0x6)
+      {
+        $proteino{$protein}[0x6] = $proteins{$protein}[0x6] = -1;
+        $frd = 0x5; next;
+      }
+      if ($frd == 0x4)
+      {
+        $proteino{$protein}[0x4] = $proteins{$protein}[0x4] = -1;
+        $frd = 0x3; next;
+      }
+      if ($frd == 0x0)
+      { $proteino{$protein}[0x0] = $proteins{$protein}[0x0] = -1; last }
+    }
+  }
+}
+
+foreach my $protein (keys %proteins)
+{
+  @grouped_peaks = ();
+  for (my $peaks_index = 0; $peaks_index < 6; $peaks_index++)
+  {
+    my $max = -0.5;	# an arbitary negative value
+    my $pindex = $peaks_index * $hexdec;
+    $peaks[$peaks_index] = $hexdec;	# initialize
+    for (my $frshift = 0; $frshift < $hexdec; $frshift++)
+    {
+      if ($proteins{$protein}[$pindex + $frshift] == $max)
+      { $peaks[$peaks_index] .= " $frshift" }
+      elsif ($proteins{$protein}[$pindex + $frshift] > $max)
+      {
+        $peaks[$peaks_index] = $frshift;
+        $max = $proteins{$protein}[$pindex + $frshift];
+      }
+    }
+  }
+
+  if (defined $opts{k} and defined $opts{p} and $protein eq $opts{p})
+  {
+    my @samples = ("s1\tu", "s1\tl", "s2\tu", "s2\tl", "s3\tu", "s3\tl");
+    for (my $peak_index = 0; $peak_index < 6; $peak_index++)
+    { print "$samples[$peak_index]\t$peaks[$peak_index]\n" }
+    exit;
+  }
+
+  ($flag01, $flag12, $flag14, $flag23, $flag34, $flag45) = (1, 1, 1, 1, 1, 1);
+#  if (&compare_peaks(0, 1) != 0)  { $flag01 = 0 }
+#  if (&compare_peaks(1, 2) != 0)  { $flag12 = 0 }
+#  if (&compare_peaks(1, 4) != 0)  { $flag14 = 0 }
+#  if (&compare_peaks(2, 3) != 0)  { $flag23 = 0 }
+#  if (&compare_peaks(3, 4) != 0)  { $flag34 = 0 }
+#  if (&compare_peaks(4, 5) != 0)  { $flag45 = 0 }
+  if (&compare_peaks(0, 1, $protein) != 0)  { $flag01 = 0 }
+  if (&compare_peaks(1, 2, $protein) != 0)  { $flag12 = 0 }
+  if (&compare_peaks(1, 4, $protein) != 0)  { $flag14 = 0 }
+  if (&compare_peaks(2, 3, $protein) != 0)  { $flag23 = 0 }
+  if (&compare_peaks(3, 4, $protein) != 0)  { $flag34 = 0 }
+  if (&compare_peaks(4, 5, $protein) != 0)  { $flag45 = 0 }
+
+  if ($flag01 == 1 or $flag23 == 1 or $flag45 == 1)
+  {
+    $selected2{$protein} = '';
+    &make_ranks($protein);
+    my $flag_selected1 = 0;
+    if ($hexdec == 0x10)
+    {
+      if (($ranks[11] == 9 and $ranks[27] == 9) or
+          ($ranks[41] == 9 and $ranks[57] == 9) or
+          ($ranks[72] == 9 and ($ranks[88] == 9 or $ranks[89] == 9)))
+      { $flag_selected1 = 1 }
+    }
+    else	# $hexdec == 10
+    {
+      if (($ranks[ 6] == 9 and $ranks[16] == 9) or
+          ($ranks[25] == 9 and $ranks[35] == 9) or
+          ($ranks[45] == 9 and ($ranks[54] == 9 or $ranks[55] == 9)))
+      { $flag_selected1 = 1 }
+    }
+    if ($flag_selected1 == 1) { $selected1{$protein} = '' }
+  }
+  if ($flag01 == 1 and $flag23 == 1 and $flag45 == 1)
+  { $selected3{$protein} = '' }
+}
+
+if    (defined $opts{a}) { ; }
+elsif (defined $opts{p})
+{
+  %proteins = ($opts{p} => $proteins{$opts{p}});
+  if (defined $opts{o})
+  { &print_proteino($opts{p}); exit }
+  if (defined $opts{n})
+  { &make_ranks($opts{p}); &print_ranks(); exit }
+}
+elsif (defined $opts{r})
+{
+  foreach (keys %selected1)
+  { print "$ARG\t$accessions{$ARG}\n"; $selected1{$ARG} = $proteins{$ARG} }
+  %proteins = %selected1;
+}
+elsif (defined $opts{s})
+{
+  foreach (keys %selected2)
+  { print "$ARG\t$accessions{$ARG}\n"; $selected2{$ARG} = $proteins{$ARG} }
+  %proteins = %selected2;
+}
+elsif (defined $opts{t})
+{
+  foreach (keys %selected3)
+  { print "$ARG\t$accessions{$ARG}\n"; $selected3{$ARG} = $proteins{$ARG} }
+  %proteins = %selected3;
+}
+else { exit }
+
+if (defined $opts{y}) { &layer_proteins(); exit }
+
+foreach my $protein (keys %proteins)
+{
+  my $file_name = "HM_${protein}.svg";
+  &make_ranks($protein);
+  open SVG, "> $file_name"                      or die "$OS_ERROR: $file_name";
+  &print_header();
+
+  my $marginh1 = $marginh;
+  my $marginv1 = $marginv;
+  if (defined $opts{m})
+  {
+    $max_area = 0;
+    for (my $i = 0; $i < $hexdec; $i++)
+    {
+      if ($proteins{$protein}[$i] > $max_area)
+        { $max_area = $proteins{$protein}[$i] }
+    }
+  }
+  for (my $i = 0; $i < $hexdec; $i++)
+  {
+    $colour = '#' . &prep_colour($i);
+    print SVG "<rect x=\"", $marginh1, "\" y=\"", $marginv1, "\" width=\"",
+      $cellh, "\" height=\"", $cellv, "\" fill=\"", $colour, "\" />\n";
+    $marginh1 += $cellh;
+  }
+  $marginh1 = $marginh;
+  $marginv1 += $cellv;
+  if (defined $opts{m})
+  {
+    $max_area = 0;
+    for (my $i = $hexdec; $i < $hexdec * 2; $i++)
+    {
+      if ($proteins{$protein}[$i] > $max_area)
+        { $max_area = $proteins{$protein}[$i] }
+    }
+  }
+  for (my $i = $hexdec; $i < $hexdec * 2; $i++)
+  {
+    $colour = '#' . &prep_colour($i);
+    print SVG "<rect x=\"", $marginh1, "\" y=\"", $marginv1, "\" width=\"",
+      $cellh, "\" height=\"", $cellv, "\" fill=\"", $colour, "\" />\n";
+    $marginh1 += $cellh;
+  }
+  if (defined $opts{b})	# draw twice to make it clearly black
+  { &draw_frame($marginv); &draw_frame($marginv) }
+
+  $marginh1 = $marginh;
+  $marginv1 += $spacev;
+  if (defined $opts{m})
+  {
+    $max_area = 0;
+    for (my $i = $hexdec * 2; $i < $hexdec * 3; $i++)
+    {
+      if ($proteins{$protein}[$i] > $max_area)
+        { $max_area = $proteins{$protein}[$i] }
+    }
+  }
+  for (my $i = $hexdec * 2; $i < $hexdec * 3; $i++)
+  {
+    $colour = '#' . &prep_colour($i);
+    print SVG "<rect x=\"", $marginh1, "\" y=\"", $marginv1, "\" width=\"",
+      $cellh, "\" height=\"", $cellv, "\" fill=\"", $colour, "\" />\n";
+    $marginh1 += $cellh;
+  }
+  $marginh1 = $marginh;
+  $marginv1 += $cellv;
+  if (defined $opts{m})
+  {
+    $max_area = 0;
+    for (my $i = $hexdec * 3; $i < $hexdec * 4; $i++)
+    {
+      if ($proteins{$protein}[$i] > $max_area)
+        { $max_area = $proteins{$protein}[$i] }
+    }
+  }
+  for (my $i = $hexdec * 3; $i < $hexdec * 4; $i++)
+  {
+    $colour = '#' . &prep_colour($i);
+    print SVG "<rect x=\"", $marginh1, "\" y=\"", $marginv1, "\" width=\"",
+      $cellh, "\" height=\"", $cellv, "\" fill=\"", $colour, "\" />\n";
+    $marginh1 += $cellh;
+  }
+  if (defined $opts{b})
+  {
+    &draw_frame($marginv + $cellv + $spacev);
+    &draw_frame($marginv + $cellv + $spacev);
+  }
+
+  $marginh1 = $marginh;
+  $marginv1 += $spacev;
+  if (defined $opts{m})
+  {
+    $max_area = 0;
+    for (my $i = $hexdec * 4; $i < $hexdec * 5; $i++)
+    {
+      if ($proteins{$protein}[$i] > $max_area)
+        { $max_area = $proteins{$protein}[$i] }
+    }
+  }
+  for (my $i = $hexdec * 4; $i < $hexdec * 5; $i++)
+  {
+    $colour = '#' . &prep_colour($i);
+    print SVG "<rect x=\"", $marginh1, "\" y=\"", $marginv1, "\" width=\"",
+      $cellh, "\" height=\"", $cellv, "\" fill=\"", $colour, "\" />\n";
+    $marginh1 += $cellh;
+  }
+  $marginh1 = $marginh;
+  $marginv1 += $cellv;
+  if (defined $opts{m})
+  {
+    $max_area = 0;
+    for (my $i = $hexdec * 5; $i < $hexdec * 6; $i++)
+    {
+      if ($proteins{$protein}[$i] > $max_area)
+        { $max_area = $proteins{$protein}[$i] }
+    }
+  }
+  for (my $i = $hexdec * 5; $i < $hexdec *6; $i++)
+  {
+    $colour = '#' . &prep_colour($i);
+    print SVG "<rect x=\"", $marginh1, "\" y=\"", $marginv1, "\" width=\"",
+      $cellh, "\" height=\"", $cellv, "\" fill=\"", $colour, "\" />\n";
+    $marginh1 += $cellh;
+  }
+  if (defined $opts{b})
+  {
+    &draw_frame($marginv + $cellv * 2 + $spacev * 2);
+    &draw_frame($marginv + $cellv * 2 + $spacev * 2);
+  }
+  
+  &print_text($protein);
+  close SVG;
+}
+
+
+sub print_header
+{
+  print SVG <<SVG_HEADER;
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+SVG_HEADER
+}
+
+
+sub print_footer
+{
+  print SVG "</svg>\n";
+}
+
+
+sub print_text
+{
+  my $description = &protein_description($ARG[0]);
+  print SVG "<g font-family=\"sans-serif\" fill=\"$fontcolour\" ",
+        "font-size=\"$fontsize\">\n";
+  print SVG "  <text x=\"$fontx\" y=\"$fonty\">$description</text>\n";
+  print SVG "</g>\n";
+  &print_footer();
+}
+
+
+sub rand_colour
+{
+  my ($red, $green) = (16, 12);
+  my ($r1, $r2, $g1, $g2);
+  $r1 = sprintf ("%x", (int (rand $red)));
+  $r2 = sprintf ("%x", (int (rand $red)));
+  $g1 = sprintf ("%x", (int (rand $green)));
+  $g2 = sprintf ("%x", (int (rand $green)));
+  return "$r1$r2$g1$g2" . '00'
+}
+
+
+sub prepare_colour
+{
+  my ($logarea) = @ARG;
+  my $third = $max_area / 3;
+  my ($red, $green) = (255, 255);
+  my ($r, $g) = ('00', '00');
+  if ($logarea < 0) { return '888888' }
+  if ($logarea > $third)
+  {
+    $r = sprintf ("%02x",
+      (int (($logarea - $third) / ($max_area - $third) * 255)));
+  }
+  if ($logarea < ($third * 2))
+  {
+    $g = sprintf ("%02x",
+      (int (($third * 2 - $logarea) / ($third * 2) * 255)));
+  }
+  if ($logarea == 0) { $g = 'ff' }
+  return "$r$g" . '00'
+}
+
+
+sub prep_colour
+{
+  my $rank = $ranks[$ARG[0]];
+  if    ($rank > 8) { return 'ff0000' }
+  elsif ($rank > 7) { return 'cc1100' }
+  elsif ($rank > 6) { return 'aa3300' }
+  elsif ($rank > 5) { return '885500' }
+  elsif ($rank > 4) { return '667700' }
+  elsif ($rank > 3) { return '449900' }
+  elsif ($rank > 2) { return '22bb00' }
+  elsif ($rank > 1) { return '11cc00' }
+  elsif ($rank > 0) { return '08dd00' }
+  elsif ($rank > 7) { return '00ee00' }
+  else              { return '888888' }
+}
+
+
+sub heat_colours
+{
+  my $file_name = "HM_colors.svg";
+  my ($y, $length, $r, $g) = (4, 64, '00', '00');
+  my $third = $max_area / 3;
+  open SVG, "> $file_name"                      or die "$OS_ERROR: $file_name";
+  &print_header();
+  for (my $colour = 255; $colour >= 0; $colour--)
+  {
+    my $value = $colour / 255 * $max_area;
+    if ($value > $third)
+    {
+      $r = sprintf ("%02x",
+        (int (($value - $third) / ($max_area - $third) * 255)));
+    }
+    if ($value < ($third * 2))
+    {
+      $g = sprintf ("%02x",
+        (int (($third * 2 - $value) / ($third * 2) * 255)));
+    }
+    $y = 255 - $colour + 4;
+    print SVG "<line x1=\"4\" y1=\"", $y, "\" x2=\"", $length, "\" y2=\"",
+      $y, "\" style=\"stroke: #$r$g", "00; stroke-width: 1;\" />\n";
+  }
+  &print_footer();
+  close SVG;
+}
+
+
+sub heat_colours_stepwise
+{
+  my $file_name = "HM_colors_sw.svg";
+  my ($x, $y, $width, $height) = (4, 4, 64, 26);
+  open SVG, "> $file_name"                      or die "$OS_ERROR: $file_name";
+  &print_header();
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#ff0000\" />\n";
+  $y += $height;
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#cc1100\" />\n";
+  $y += $height;
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#aa3300\" />\n";
+  $y += $height;
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#885500\" />\n";
+  $y += $height;
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#667700\" />\n";
+  $y += $height;
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#449900\" />\n";
+  $y += $height;
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#22bb00\" />\n";
+  $y += $height;
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#11cc00\" />\n";
+  $y += $height;
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#08dd00\" />\n";
+  $y += $height;
+  print SVG "<rect x=\"", $x, "\" y=\"", $y, "\" width=\"", $width,
+            "\" height=\"", $height, "\" fill=\"#00ee00\" />\n";
+  &print_footer();
+  close SVG;
+}
+
+
+sub group_peaks
+{
+  if ($ARG[0] =~ m/^\d+$/)
+  {
+    if ($ARG[0] < 12) { return (int ($ARG[0] / 2.0)) }
+    else              { return ($ARG[0] - 7) }
+  }
+  else
+  {
+    my @positions = split /\s/, $ARG[0];
+    my @rt = ();
+    foreach (@positions)
+    {
+      unless ($ARG =~ m/^\d+$/)            { die "Number error 2: @positions" }
+      if ($ARG < 12) { push @rt, (int ($ARG / 2.0)) }
+      else           { push @rt, ($ARG - 7) }
+    }
+    return "@rt";
+  }
+}
+
+
+sub compare_peaks
+{
+  if ($peaks[$ARG[0]] eq $hexdec or $peaks[$ARG[1]] eq $hexdec)
+		# cannot use == in this case; $hexdec: initialized value
+  { return -1 }	# when no data
+  if ($hexdec == 10 or ($ARG[0] == 0 and $ARG[1] == 1)
+                    or ($ARG[0] == 2 and $ARG[1] == 3))	# purple box
+  {
+    if ($peaks[$ARG[0]] =~ m/^\d$/ and $peaks[$ARG[1]] =~ m/^\d$/)
+    { if ($peaks[$ARG[0]] == $peaks[$ARG[1]]) { return 0 } }	# equal
+    else
+    {
+      foreach my $arg0 (split / /, $peaks[$ARG[0]])
+      {
+        foreach my $arg1 (split / /, $peaks[$ARG[1]])
+        { if ($arg0 == $arg1) { return 0 } }	# equal at leaset in one case
+      }
+    }
+    if ($ARG[0] == 4 and $ARG[1] == 5 and $peaks[4] =~ m/5/)	# orange box
+    { if ($peaks[5] =~ m/4/) { return 0 } }	# treat it as being equal
+    return 1;	# not equal
+  }
+  else	# when $hexdec == 0x10; there are some exceptions, see above
+  {	# blue box
+    if (0 == scalar @grouped_peaks)	# when called for the first time
+    {	# see fg1218_grouping.png
+      for (my $i = 0; $i < 6; $i++)
+      { $grouped_peaks[$i] = &group_peaks($peaks[$i]) }
+    }
+    if ($grouped_peaks[$ARG[0]] =~ m/^\d$/ and
+        $grouped_peaks[$ARG[1]] =~ m/^\d$/)
+    { if ($grouped_peaks[$ARG[0]] == $grouped_peaks[$ARG[1]]) { return 0 } }
+    else
+    {
+      foreach my $arg0 (split / /, $grouped_peaks[$ARG[0]])
+      {
+        foreach my $arg1 (split / /, $grouped_peaks[$ARG[1]])
+        { if ($arg0 == $arg1) { return 0 } }	# equal at leaset in one case
+      }
+    }
+    return 1;	# not equal
+  }
+}
+
+
+sub draw_frame
+{
+  my ($fmarginv) = @ARG;
+  my ($x1, $y1, $x2, $y2);
+  $x1 = $x2 = $marginh - $lw;
+  $y1 = $fmarginv - $lw;
+  $y2 = $y1 + $cellv * 2 + $lw * 2;
+  print SVG "<line x1=\"", $x1, "\" y1=\"", $y1, "\" x2=\"", $x2,
+    "\" y2=\"", $y2, "\" style=\"stroke: black; stroke-width: ",
+    $lw, ";\"/>";
+  $x1 = $x2 = $x1 + $cellh * $hexdec + $lw * 2;
+  print SVG "<line x1=\"", $x1, "\" y1=\"", $y1, "\" x2=\"", $x2,
+    "\" y2=\"", $y2, "\" style=\"stroke: black; stroke-width: ",
+    $lw, ";\"/>";
+  $x1 = $marginh - $lw;
+  $x2 = $x1 + $cellh * $hexdec + $lw * 2;
+  $y1 = $y2 = $fmarginv - $lw;
+  print SVG "<line x1=\"", $x1, "\" y1=\"", $y1, "\" x2=\"", $x2,
+    "\" y2=\"", $y2, "\" style=\"stroke: black; stroke-width: ",
+    $lw, ";\"/>";
+  $y1 = $y2 = $y1 + $cellv * 2 + $lw * 2;
+  print SVG "<line x1=\"", $x1, "\" y1=\"", $y1, "\" x2=\"", $x2,
+    "\" y2=\"", $y2, "\" style=\"stroke: black; stroke-width: ",
+    $lw, ";\"/>";
+}
+
+
+sub layer_proteins
+{
+  my @proteins = split /,/, $opts{y};
+  my $samplen = shift @proteins;
+  foreach my $proteins (@proteins)
+  {
+    ;	# coding
+  }
+}
+
+
+sub protein_description
+{
+  $accessions{$ARG[0]} =~ m/^(.+) OS=Homo /
+                                           or die "Accession error 1: $ARG[0]";
+  return $1;
+}
+
+
+sub print_proteino
+{
+  for (my $i = 0; $i < $hexdec * 6; $i++)
+  {
+    print $proteino{$ARG[0]}[$i];
+    if (($i + 1) % $hexdec == 0) { print "\n" }
+    else                         { print "\t" }
+  }
+}
+
+
+sub print_ranks
+{
+  for (my $i = 0; $i < $hexdec * 6; $i++)
+  {
+    print $ranks[$i];
+    if (($i + 1) % $hexdec == 0) { print "\n" }
+    else                         { print "\t" }
+  }
+}
+
+
+sub make_ranks
+{
+  my ($protein) = @ARG;
+  for (my $i = 0; $i < $hexdec * 6; $i++) { $ranks[$i] = -1 }
+  for (my $samp = 0; $samp < 6; $samp++)
+  {
+    my @area_data = ();	# its size will be 10 or 0x10
+    for (my $i = 0; $i < $hexdec; $i++)
+    { push @area_data, $proteins{$protein}[$samp * $hexdec + $i] }
+    for (my $i = 9; $i >= 0; $i--)
+    {
+      my @max_pos = split /\t/, &position_max(@area_data);
+      if ($max_pos[0] == -0.1) { next }
+      foreach (@max_pos)
+      {
+        $ranks[$samp * $hexdec + $ARG] = $i;
+        $area_data[$ARG] = -1;	# discard max data for next rank
+      }
+      $i -= ((scalar @max_pos) - 1);
+    }
+  }
+}
+
+
+sub position_max
+{
+  my (@data) = @ARG;
+  my ($max, $max_pos) = (-0.1, -0.1);
+  my $n_data = scalar @data;
+
+  for (my $i = 0; $i < $n_data; $i++)
+  {
+    if ($data[$i] > $max) { $max = $data[$i]; $max_pos = $i }
+    elsif ($data[$i] == $max) { $max_pos .= "\t$i" }
+  }
+  return $max_pos;	# an integer or tab-delimited string (error: -0.1)
+}
