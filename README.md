@@ -1,16 +1,13 @@
 # EV-saliva
 
-draw_heat_map - analyze quantified mass data and draw heat maps
-
+draw_heat_map - analyze quantified mass data and draw heat maps  
 This script analyzes quantified mass data of the three saliva samples and draws heat maps.
 
 --------
 
 ## Synopsis
 
-draw_heat_map [-a] [-b] [-d] [-e] [-h] [-k] [-l] [-m] [-n] \
-              [-o] [-p Accession__of_a_protein] [-r] [-s] [-t] \
-              [-v] [-w] [-y sample,protein1,protein2,...]
+draw_heat_map [-a] [-b] [-d] [-e] [-h] [-k] [-l] [-m] [-n] [-o] [-p Accession__of_a_protein] [-r] [-s] [-t] [-v] [-w] [-y sample,protein1,protein2,...]
 
 --------
 
@@ -38,7 +35,7 @@ $ draw_heat_map -s -d
 $ draw_heat_map -t  
 $ draw_heat_map -v  
 $ draw_heat_map -w  
-$ draw_heat_map -y 4,P01596,P04003,P06737,P63167,Q13347,Q9UL52  
+$ draw_heat_map -y 4,P01596,P04003,P06737,P63167,Q13347,Q9UL52
 
 --------
 
@@ -61,7 +58,6 @@ $ draw_heat_map -y 4,P01596,P04003,P06737,P63167,Q13347,Q9UL52
 -t  List of type3 proteins  
 -v  Print its version number  
 -w  Draw stepwise heat colors  
--y  Layer expression levels of specified proteins  
-      (samples; 0: 1u, 1: 1l, 2: 2u, 3: 2l, 4: 3u, 5: 3l) 
+-y  Layer expression levels of specified proteins (samples; 0: 1u, 1: 1l, 2: 2u, 3: 2l, 4: 3u, 5: 3l)
 
 --------
