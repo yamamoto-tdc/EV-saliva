@@ -849,9 +849,7 @@ sub layer_proteins
   my @proteins = split /,/, $opts{y};
   my $samplen = shift @proteins;
   foreach my $proteins (@proteins)
-  {
-    ;	# coding
-  }
+  { ; }	# coding
 }
 
 
